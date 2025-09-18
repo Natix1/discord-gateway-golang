@@ -10,26 +10,18 @@ func reconnect() {
 		log.Fatal("Can't reconnect. Resume URL or Session ID invalid.")
 	}
 
-	resumeData, err := json.Marshal(ResumeData{
+	resumeData := ResumeData{
 		Token:      token,
 		SessionID:  *lastSessionId,
 		LastSerial: *lastSerial,
-	})
-
-	if err != nil {
-		log.Fatal("Failed serializing resume data.")
 	}
 
-	eventData, err := json.Marshal(Event{
+	eventData := Event{
 		Opcode: ResumeOpcode,
-		Data:   resumeData,
-	})
-
-	if err != nil {
-		log.Fatal("Failed serializing event data with resume data.")
+		Data:   *toJSON(resumeData),
 	}
 
-	writeToWebsocket(eventData)
+	writeToWebsocket(*toJSON(eventData))
 }
 
 func init() {

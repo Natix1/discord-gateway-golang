@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"log"
 	"math/rand"
 	"time"
 )
@@ -22,13 +20,8 @@ func sendHeartbeat() {
 		Serial: lastSerial,
 	}
 
-	serialized, err := json.Marshal(data)
-	if err != nil {
-		log.Fatalf("Failed serializing heartbeat: %s. Critical.", err.Error())
-	}
-
 	debug("Sending heartbeat...")
-	writeToWebsocket(serialized)
+	writeToWebsocket(*toJSON(data))
 }
 
 func startHeartbeatLoop(initial_interval int) {

@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -29,11 +30,13 @@ var (
 	callbackMutex  sync.RWMutex
 
 	// Reconnecting
-	lastSerial    *int    = nil
-	lastSessionId *string = nil
-	lastResumeUrl *string = nil
+	lastSerial    *int       = nil
+	lastSessionId *Snowflake = nil
+	lastResumeUrl *string    = nil
 
-	token string = ""
+	// Bot settings
+	intents        = 33281
+	token   string = ""
 )
 
 func debug(msg string) {
@@ -42,6 +45,11 @@ func debug(msg string) {
 	}
 
 	fmt.Print(msg + "\n")
+}
+
+func toJSON(v any) *[]byte {
+	data, _ := json.Marshal(v)
+	return &data
 }
 
 func init() {
@@ -65,7 +73,6 @@ func websocketWriterLoop() {
 	for {
 		write := <-websocketWrites
 		err := wsconn.WriteJSON(write)
-		debug(fmt.Sprintf("Wrote event to discord. Raw data: \n%v", string(write)))
 
 		if err != nil {
 			log.Printf("Error when writing to websocket: %s. Ignoring.", err.Error())
@@ -144,6 +151,30 @@ func waitOpcode(opcode int) Event {
 	<-waiter
 	cancel()
 	return eventData
+}
+
+func waitEventName(eventName string) Event {
+	waiter := make(chan bool)
+	var eventData Event
+
+	cancel := addEventCallback(func(data Event) {
+		if data.EventName == nil {
+			return
+		}
+
+		if strings.EqualFold(eventName, *data.EventName) {
+			waiter <- true
+			eventData = data
+		}
+	})
+
+	<-waiter
+	cancel()
+	return eventData
+}
+
+func waitReady() {
+	waitEventName("READY")
 }
 
 func writeToWebsocket(data []byte) {

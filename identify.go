@@ -1,14 +1,5 @@
 package main
 
-import (
-	"encoding/json"
-	"log"
-)
-
-const (
-	intents = 32769
-)
-
 func init() {
 	addEventCallback(func(data Event) {
 		if data.Opcode != HelloOpcode {
@@ -29,22 +20,12 @@ func init() {
 			},
 		}
 
-		identifyDataSerialized, err := json.Marshal(identifyData)
-		if err != nil {
-			log.Fatalf("Failed serializing identify data: %s", err.Error())
-		}
-
 		eventData := Event{
 			Opcode: IdentifyOpcode,
-			Data:   identifyDataSerialized,
+			Data:   *toJSON(identifyData),
 		}
 
-		eventDataSerialized, err := json.Marshal(eventData)
-		if err != nil {
-			log.Fatalf("Failed serializing event data: %s", err.Error())
-		}
-
-		writeToWebsocket(eventDataSerialized)
+		writeToWebsocket(*toJSON(eventData))
 	})
 }
 
