@@ -1,9 +1,9 @@
-package main
+package discordgateway
 
 var ()
 
 func init() {
-	addEventCallback(func(data Event) {
+	AddEventCallback(func(data Event) {
 		if data.Serial == nil {
 			return
 		}

@@ -1,4 +1,4 @@
-package main
+package discordgateway
 
 import (
 	"encoding/json"
@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	addEventCallback(func(rawData Event) {
+	AddEventCallback(func(rawData Event) {
 		if rawData.Opcode != HelloOpcode {
 			return
 		}

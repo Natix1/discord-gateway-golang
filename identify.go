@@ -1,7 +1,7 @@
-package main
+package discordgateway
 
 func init() {
-	addEventCallback(func(data Event) {
+	AddEventCallback(func(data Event) {
 		if data.Opcode != HelloOpcode {
 			return
 		}

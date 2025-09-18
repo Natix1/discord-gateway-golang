@@ -1,4 +1,4 @@
-package main
+package discordgateway
 
 import (
 	"encoding/json"
@@ -25,7 +25,7 @@ func reconnect() {
 }
 
 func init() {
-	addEventCallback(func(data Event) {
+	AddEventCallback(func(data Event) {
 		if data.Opcode == ReconnectOpcode {
 			reconnect()
 		}

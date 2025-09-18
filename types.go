@@ -1,11 +1,50 @@
-package main
+package discordgateway
 
 import (
+	"context"
 	"encoding/json"
+	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
-type Snowflake string
+type Snowflake = string
+
+type LibClient struct {
+	token     string
+	context   context.Context
+	intents   int
+	debugMode bool
+	ready     bool
+
+	eventCallbacks    map[string][]func(data *Event)
+	opcodeCallbacks   map[int][]func(data *Event)
+	readyCallbacks    []func()
+	anyEventCalblacks []func(data *Event)
+	callbackMutex     sync.RWMutex
+	nextCallbackID    int
+
+	lastSessionID     *string
+	lastReconnectURL  *string
+	lastSerial        *int
+	heartbeatInterval *time.Duration
+
+	websocketConnection *websocket.Conn
+	websocketWriteQueue chan []byte
+}
+
+type HeartbeatEvent struct {
+	Opcode     int  `json:"op"`
+	LastSerial *int `json:"d"`
+}
+
+type EventDispatcher struct {
+	eventNameOrOpcode any
+	id                int
+	eventType         int // 0 = opcode, 1 = eventName, 2 = any
+	client            *LibClient
+}
 
 type Event struct {
 	Opcode    int             `json:"op"`
@@ -14,14 +53,16 @@ type Event struct {
 	Serial    *int            `json:"s"`
 }
 
+type IdentifyProperties struct {
+	OperatingSystem string `json:"os"`
+	Browser         string `json:"browser"`
+	Device          string `json:"device"`
+}
+
 type IdentifyData struct {
-	Token      string `json:"token"`
-	Intents    int    `json:"intents"`
-	Properties struct {
-		OperatingSystem string `json:"os"`
-		Browser         string `json:"browser"`
-		Device          string `json:"device"`
-	} `json:"properties"`
+	Token      string             `json:"token"`
+	Intents    int                `json:"intents"`
+	Properties IdentifyProperties `json:"properties"`
 }
 
 type HelloData struct {

@@ -1,4 +1,4 @@
-package main
+package discordgateway
 
 import (
 	"encoding/json"
@@ -19,7 +19,7 @@ func startMain() {
 
 func TestMessages(t *testing.T) {
 	startMain()
-	waitReady()
+	WaitReady()
 
 	channel := PartialChannel{
 		ID: Snowflake("1327997437805334539"),
@@ -30,7 +30,7 @@ func TestMessages(t *testing.T) {
 	confirmedWait := make(chan bool)
 	nonce := channel.SendDeferred("[Unit test] I am a deferred message.")
 
-	cancel := addEventCallback(func(data Event) {
+	cancel := AddEventCallback(func(data Event) {
 		if !(data.EventName != nil && *data.EventName == "MESSAGE_CREATE") {
 			return
 		}
