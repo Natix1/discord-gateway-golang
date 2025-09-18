@@ -2,13 +2,6 @@ package main
 
 import "encoding/json"
 
-const (
-	HelloOpcode                = 10
-	HeartbeatOpcode            = 1
-	HeartbeatAcknowledgeOpcode = 11
-	IdentifyOpcode             = 2
-)
-
 type Event struct {
 	Opcode    int             `json:"op"`
 	Data      json.RawMessage `json:"d"`
@@ -30,5 +23,13 @@ type HelloData struct {
 	HeartbeatInterval int `json:"heartbeat_interval"`
 }
 
-type HeartbeatAcknowledge struct {
+type ReadyData struct {
+	ResumeGatewayURL string `json:"resume_gateway_url"`
+	SessionID        string `json:"session_id"`
+}
+
+type ResumeData struct {
+	Token      string `json:"token"`
+	SessionID  string `json:"session_id"`
+	LastSerial int    `json:"seq"`
 }

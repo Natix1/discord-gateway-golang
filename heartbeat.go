@@ -19,7 +19,7 @@ func sendHeartbeat() {
 		Serial *int `json:"d"`
 	}{
 		Opcode: 1,
-		Serial: topSerial,
+		Serial: lastSerial,
 	}
 
 	serialized, err := json.Marshal(data)
@@ -28,7 +28,7 @@ func sendHeartbeat() {
 	}
 
 	debug("Sending heartbeat...")
-	writeToSocket(serialized)
+	writeToWebsocket(serialized)
 }
 
 func startHeartbeatLoop(initial_interval int) {
@@ -38,7 +38,7 @@ func startHeartbeatLoop(initial_interval int) {
 		jitter := getJitter()
 		waitJitter := time.Duration(float64(waitTime)*jitter) * time.Millisecond
 
-		debug(fmt.Sprintf("Waiting %dms before sending heartbeat... (jitter = %.3f, waitTime = %dms, total wait time = %dms)",
+		debug(fmt.Sprintf("Waiting %dms before sending our heartbeat... (jitter = %.3f, waitTime = %dms, total wait time = %dms)",
 			waitJitter.Milliseconds(), jitter, waitTime, waitJitter.Milliseconds()))
 
 		time.Sleep(waitJitter)

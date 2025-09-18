@@ -5,13 +5,47 @@ import (
 	"log"
 )
 
-func identify(data IdentifyData) {
-	serialized, err := json.Marshal(data)
-	if err != nil {
-		log.Fatalf("Failed while serializing Identify event data: %s", err.Error())
-	}
+const (
+	intents = 32769
+)
 
-	writeToSocket(serialized)
+func init() {
+	addEventCallback(func(data Event) {
+		if data.Opcode != HelloOpcode {
+			return
+		}
+
+		identifyData := IdentifyData{
+			Token:   token,
+			Intents: intents,
+			Properties: struct {
+				OperatingSystem string `json:"os"`
+				Browser         string `json:"browser"`
+				Device          string `json:"device"`
+			}{
+				OperatingSystem: "Linux",
+				Browser:         "github.com/natix1/discord-gateway-golang",
+				Device:          "github.com/natix1/discord-gateway-golang",
+			},
+		}
+
+		identifyDataSerialized, err := json.Marshal(identifyData)
+		if err != nil {
+			log.Fatalf("Failed serializing identify data: %s", err.Error())
+		}
+
+		eventData := Event{
+			Opcode: IdentifyOpcode,
+			Data:   identifyDataSerialized,
+		}
+
+		eventDataSerialized, err := json.Marshal(eventData)
+		if err != nil {
+			log.Fatalf("Failed serializing event data: %s", err.Error())
+		}
+
+		writeToWebsocket(eventDataSerialized)
+	})
 }
 
 /*
