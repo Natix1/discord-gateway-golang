@@ -1,4 +1,4 @@
-module github.com/natix1/discord-gateway-golang
+module github.com/natix1/discord-go
 
 go 1.24.0
 
