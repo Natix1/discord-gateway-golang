@@ -1,63 +1,60 @@
-package main
+package discord
 
 import (
-	"encoding/json"
-	"fmt"
-	"sync"
+	"context"
+	"log"
+	"os"
 	"testing"
+
+	"github.com/joho/godotenv"
 )
 
-var (
-	mainOnce sync.Once
-)
+var bot *BotClient
 
-func startMain() {
-	mainOnce.Do(func() {
-		go main()
-	})
-}
+func getToken() string {
+	godotenv.Load()
 
-func TestMessages(t *testing.T) {
-	startMain()
-	waitReady()
-
-	channel := PartialChannel{
-		ID: Snowflake("1327997437805334539"),
+	token := os.Getenv("TOKEN")
+	if token == "" {
+		panic("TOKEN not set")
 	}
 
-	// NONCE MESSAGE
+	return token
+}
 
-	confirmedWait := make(chan bool)
-	nonce := channel.SendDeferred("[Unit test] I am a deferred message.")
+func TestMain(m *testing.M) {
+	log.Print("Starting TestMain bot...")
 
-	cancel := addEventCallback(func(data Event) {
-		if !(data.EventName != nil && *data.EventName == "MESSAGE_CREATE") {
-			return
-		}
+	c := New(getToken(), 33281, context.TODO())
+	bot = &c
+	bot.Run()
 
-		var message Message
-		err := json.Unmarshal(data.Data, &message)
+	code := m.Run()
+
+	bot.Cleanup()
+	log.Print("Tests over...")
+	os.Exit(code)
+}
+
+func TestLogin(t *testing.T) {
+	waiter := make(chan bool)
+
+	bot.OnReady(func() {
+		t.Log("Logged in")
+		waiter <- true
+	})
+
+	<-waiter
+}
+
+func TestMessage(t *testing.T) {
+	bot.OnReady(func() {
+		channel := bot.GetChannel("1327997437805334539")
+		msg, err := channel.SendMessage("Hello, world! This is a unit test.")
 		if err != nil {
 			t.Fatal(err.Error())
 		}
 
-		if message.Nonce == nil {
-			return
-		}
-
-		if *message.Nonce == nonce {
-			confirmedWait <- true
-			fmt.Printf("Nonce worked. EUREKA. Nonce = %s", nonce)
-		}
+		t.Log("Message sent! ID: " + msg.ID)
 	})
-
-	<-confirmedWait
-	cancel()
-
-	// REGULAR MESSAGE
-
-	_, err := channel.Send("[Unit test] Hello, world! I, on the other hand, am a normal message")
-	if err != nil {
-		t.Fatal(err.Error())
-	}
 }

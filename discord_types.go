@@ -1,11 +1,14 @@
-package main
+package discord
 
 import (
 	"encoding/json"
 	"time"
 )
 
-type Snowflake string
+type HeartbeatEvent struct {
+	Opcode     int  `json:"op"`
+	LastSerial *int `json:"d"`
+}
 
 type Event struct {
 	Opcode    int             `json:"op"`
@@ -14,14 +17,21 @@ type Event struct {
 	Serial    *int            `json:"s"`
 }
 
+type IdentifyProperties struct {
+	OperatingSystem string `json:"os"`
+	Browser         string `json:"browser"`
+	Device          string `json:"device"`
+}
+
+type InvalidSession struct {
+	Opcode          int  `json:"op"`
+	ShouldReconnect bool `json:"d"`
+}
+
 type IdentifyData struct {
-	Token      string `json:"token"`
-	Intents    int    `json:"intents"`
-	Properties struct {
-		OperatingSystem string `json:"os"`
-		Browser         string `json:"browser"`
-		Device          string `json:"device"`
-	} `json:"properties"`
+	Token      string             `json:"token"`
+	Intents    int                `json:"intents"`
+	Properties IdentifyProperties `json:"properties"`
 }
 
 type HelloData struct {
@@ -40,12 +50,12 @@ type ResumeData struct {
 }
 
 type User struct {
-	ID          Snowflake `json:"id"`
-	Username    string    `json:"username"`
-	Tag         string    `json:"discriminator"`
-	DisplayName *string   `json:"global_name"`
-	AvatarHash  *string   `json:"avatar"`
-	IsBot       *bool     `json:"bot"`
+	Object
+	Username    *string `json:"username"`
+	Tag         *string `json:"discriminator"`
+	DisplayName *string `json:"global_name"`
+	AvatarHash  *string `json:"avatar"`
+	IsBot       *bool   `json:"bot"`
 }
 
 type Embed struct {
@@ -71,25 +81,32 @@ type MessageSendData struct {
 	Nonce            *string           `json:"nonce"`
 }
 
-type PartialChannel struct {
+type Object struct {
 	ID Snowflake `json:"id"`
+
+	client    *BotClient
+	Available bool
+}
+
+type Channel struct {
+	Object
 }
 
 type Application struct {
-	ID          Snowflake `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	IconHash    *string   `json:"icon"`
-	Bot         *User     `json:"bot"`
+	Object
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	IconHash    *string `json:"icon"`
+	Bot         *User   `json:"bot"`
 }
 
 type Message struct {
-	ID        Snowflake  `json:"id"`
+	Object
 	GuildID   *Snowflake `json:"guild_id"`
-	ChannelID Snowflake  `json:"channel_id"`
+	ChannelID *Snowflake `json:"channel_id"`
 	Author    *User      `json:"author"`
-	Content   string     `json:"content"`
+	Content   *string    `json:"content"`
 	Nonce     *string    `json:"nonce"`
-	CreatedAt time.Time  `json:"timestamp"`
+	CreatedAt *time.Time `json:"timestamp"`
 	EditedAt  *time.Time `json:"edited_timestamp"`
 }

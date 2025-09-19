@@ -1,4 +1,4 @@
-package main
+package discord
 
 const (
 	DefaultMessageReference = 0
