@@ -371,6 +371,9 @@ func (client *BotClient) bindDefaultEvents() {
 		if err := json.Unmarshal(event.Data, &b); err == nil {
 			if b {
 				client.reconnect()
+			} else {
+				client.Cleanup()
+				client.Run()
 			}
 		}
 	})
