@@ -1,4 +1,4 @@
-package discordgateway
+package discord
 
 import (
 	"context"

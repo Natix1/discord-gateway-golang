@@ -1,4 +1,4 @@
-package discordgateway
+package discord
 
 func (eh *EventDispatcher) Disconnect() {
 	eh.client.callbackMutex.Lock()

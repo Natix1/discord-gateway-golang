@@ -1,4 +1,4 @@
-package discordgateway
+package discord
 
 const (
 	DefaultMessageReference = 0
