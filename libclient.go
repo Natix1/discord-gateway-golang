@@ -229,45 +229,39 @@ func (client *BotClient) startHeartbeatLoop() {
 	}
 
 	client.heartbeatRunning = true
-	firstRun := true
 
+	sendHeartbeat := func() {
+		data := HeartbeatEvent{
+			Opcode:     HeartbeatOpcode,
+			LastSerial: client.lastSerial,
+		}
+
+		client.DebugPrint("Sending heartbeat...")
+		client.writeSocket(toJSON(data))
+	}
+
+	jitter := rand.Float64()
+	time.Sleep(time.Millisecond * time.Duration(float64(client.heartbeatInterval.Milliseconds())*jitter))
+	sendHeartbeat()
+
+	ticker := time.NewTicker(*client.heartbeatInterval)
 	go func() {
 		for {
 			if client.websocketConnection == nil {
-				time.Sleep(time.Second)
-				continue
+				break
 			}
 
-			if client.heartbeatInterval == nil {
-				time.Sleep(time.Second)
-				continue
+			<-ticker.C
+
+			if client.websocketConnection == nil {
+				break
 			}
 
-			jitter := 1.0
-			if firstRun {
-				jitter = rand.Float64()
-			}
-
-			waitTimeMs := float64(client.heartbeatInterval.Milliseconds()) * jitter
-			waitTime := time.Duration(waitTimeMs) * time.Millisecond
-
-			client.DebugPrintf(
-				"Waiting for next heartbeat... (jitter = %.3f, interval = %d, final = %d)",
-				jitter,
-				client.heartbeatInterval.Milliseconds(),
-				waitTime.Milliseconds(),
-			)
-
-			time.Sleep(waitTime)
-
-			data := HeartbeatEvent{
-				Opcode:     HeartbeatOpcode,
-				LastSerial: client.lastSerial,
-			}
-
-			client.writeSocket(toJSON(data))
-			firstRun = false
+			sendHeartbeat()
 		}
+
+		ticker.Stop()
+		client.heartbeatRunning = false
 	}()
 }
 
