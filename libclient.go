@@ -3,9 +3,13 @@ package discord
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
+	"net"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,9 +18,11 @@ import (
 )
 
 const (
-	defaultURL = "wss://gateway.discord.gg?v=10&encoding=json"
-	version    = "v0.0.1"
-	clientName = "github.com/natix1/discord-gateway-golang"
+	defaultURL         = "wss://gateway.discord.gg?v=10&encoding=json"
+	version            = "v0.0.1"
+	clientName         = "github.com/natix1/discord-gateway-golang"
+	debugMode          = true
+	debugVerboseOutput = false
 )
 
 const (
@@ -30,79 +36,91 @@ const (
 	ResumeOpcode               = 6
 )
 
-type CallbackType interface {
-	~int | ~string
-}
-
-func toJSON(v any) *[]byte {
+func toJSON(v any) []byte {
 	data, _ := json.Marshal(v)
-	return &data
+	return data
 }
 
-func (client *LibClient) OnEvent(eventName string, callback func(event *Event)) EventDispatcher {
+func (client *BotClient) addCallback(eventType int, callback CallbackFunction) *Callback {
+	client.callbackMutex.Lock()
+	defer client.callbackMutex.Unlock()
+
+	client.nextCallbackID++
+	cb := &Callback{
+		id:           client.nextCallbackID,
+		callbackType: eventType,
+		client:       client,
+		function:     &callback,
+	}
+
+	client.callbacks[client.nextCallbackID] = cb
+	return cb
+}
+
+func (client *BotClient) OnEvent(eventName string, callback CallbackFunction) *Callback {
 	eventName = strings.ToLower(eventName)
 
-	client.callbackMutex.Lock()
-	defer client.callbackMutex.Unlock()
-
-	client.nextCallbackID++
-	client.eventCallbacks[eventName][client.nextCallbackID] = callback
-
-	return EventDispatcher{
-		eventNameOrOpcode: eventName,
-		eventType:         1,
-		id:                client.nextCallbackID,
-		client:            client,
-	}
+	return client.addCallback(_EventNameCallbackType, func(event *Event) {
+		if event.EventName != nil && strings.EqualFold(*event.EventName, eventName) {
+			go callback(event)
+		}
+	})
 }
 
-func (client *LibClient) OnReady(callback func()) {
+func (client *BotClient) OnReady(callback func()) *Callback {
 	if client.ready {
-		callback()
+		go callback()
+		return nil
 	} else {
-		client.readyCallbacks = append(client.readyCallbacks, callback)
+		return client.addCallback(_ReadyCallbackType, func(_ *Event) {
+			go callback()
+		})
 	}
 }
 
-func (client *LibClient) OnOpcode(opcode int, callback func(event *Event)) EventDispatcher {
-	client.callbackMutex.Lock()
-	defer client.callbackMutex.Unlock()
-
-	client.nextCallbackID++
-	client.opcodeCallbacks[opcode][client.nextCallbackID] = callback
-
-	return EventDispatcher{
-		eventNameOrOpcode: opcode,
-		eventType:         0,
-		id:                client.nextCallbackID,
-		client:            client,
-	}
+func (client *BotClient) OnOpcode(opcode int, callback CallbackFunction) *Callback {
+	return client.addCallback(_OpcodeCallbackType, func(event *Event) {
+		if event.Opcode == opcode {
+			go callback(event)
+		}
+	})
 }
 
-func (client *LibClient) OnAnyEvent(callback func(event *Event)) EventDispatcher {
-	client.callbackMutex.Lock()
-	defer client.callbackMutex.Unlock()
-	client.nextCallbackID++
-	client.anyEventCalblacks = append(client.anyEventCalblacks, callback)
-
-	return EventDispatcher{
-		eventNameOrOpcode: "any",
-		eventType:         2,
-		id:                client.nextCallbackID,
-		client:            client,
-	}
+func (client *BotClient) OnAnyEvent(callback func(event *Event)) *Callback {
+	return client.addCallback(_AnyCallbackType, callback)
 }
 
-func (client *LibClient) DebugPrint(message string) {
-	if !client.debugMode {
+func (client *BotClient) DebugPrint(message string) {
+	if !debugMode {
 		return
 	}
 
 	log.Print(message + "\n")
 }
 
-func (client *LibClient) DebugPrintf(message string, args ...any) {
-	if !client.debugMode {
+func (client *BotClient) onWebsocketError(err error) {
+	if _, ok := err.(*net.OpError); ok {
+		return
+	}
+
+	var closeErr *websocket.CloseError
+	code := 0
+	if errors.As(err, &closeErr) {
+		code = closeErr.Code
+	}
+
+	reconnectCodes := []int{4000, 4001, 4002, 4003, 4005, 4007, 4008, 4009}
+	if slices.Contains(reconnectCodes, code) || code == 0 {
+		client.DebugPrintf("Websocket error, attempting reconnect: %v", err)
+		client.reconnect()
+		return
+	}
+
+	log.Fatal(err)
+}
+
+func (client *BotClient) DebugPrintf(message string, args ...any) {
+	if !debugMode {
 		return
 	}
 
@@ -110,27 +128,31 @@ func (client *LibClient) DebugPrintf(message string, args ...any) {
 	log.Print(res + "\n")
 }
 
-func (client *LibClient) GetFullClientName() string {
+func (client *BotClient) GetFullClientName() string {
 	return fmt.Sprintf("%s (%s, %s)", clientName, clientName, version)
 }
 
 // Cleans everything up, closes any open websocket, frees things
-func (client *LibClient) Cleanup() {
+func (client *BotClient) Cleanup() {
 	client.DebugPrint("Cleanup() triggered")
 
 	if client.websocketConnection != nil {
 		message := websocket.FormatCloseMessage(1000, "Cleanup")
 		err := client.websocketConnection.WriteControl(websocket.CloseMessage, message, time.Now().Add(time.Second))
-		if err != nil && client.debugMode {
+		if err != nil && debugMode {
 			client.DebugPrint("Failed disposing of websocket gracefully.")
 		}
 
 		client.websocketConnection.Close()
 		client.websocketConnection = nil
 	}
+
+	for _, cb := range client.callbacks {
+		cb.Disconnect()
+	}
 }
 
-func (client *LibClient) bindWebsocket() {
+func (client *BotClient) bindWebsocket() {
 	// Read
 	go func() {
 		for {
@@ -141,29 +163,39 @@ func (client *LibClient) bindWebsocket() {
 			var event Event
 			err := client.websocketConnection.ReadJSON(&event)
 			if err != nil {
-				if _, ok := err.(*websocket.CloseError); ok || client.websocketConnection == nil {
-					return
-				}
-
-				log.Fatalf("Websocket write caused unknown exception: %s\n", err.Error())
+				client.onWebsocketError(err)
 			}
-
-			opcodeEvents := client.opcodeCallbacks[event.Opcode]
 
 			client.callbackMutex.RLock()
-			defer client.callbackMutex.RUnlock()
 
-			for _, handler := range opcodeEvents {
-				go handler(&event)
-			}
+			for _, handler := range client.callbacks {
+				cbFunction := *handler.function
 
-			if event.EventName != nil {
-				nameEvents := client.eventCallbacks[strings.ToLower(*event.EventName)]
+				switch handler.callbackType {
+				case _OpcodeCallbackType:
+					if event.Opcode <= 0 {
+						break
+					}
 
-				for _, handler := range nameEvents {
-					go handler(&event)
+					go cbFunction(&event)
+				case _EventNameCallbackType:
+					if event.EventName != nil {
+						go cbFunction(&event)
+					}
+				case _AnyCallbackType:
+					go cbFunction(&event)
+				case _ReadyCallbackType:
+					if event.EventName == nil {
+						break
+					}
+
+					if strings.EqualFold(*event.EventName, "ready") {
+						go cbFunction(&event)
+					}
 				}
 			}
+
+			client.callbackMutex.RUnlock()
 		}
 	}()
 
@@ -176,19 +208,29 @@ func (client *LibClient) bindWebsocket() {
 				break
 			}
 
+			if debugMode && debugVerboseOutput {
+				lines := ""
+				lines += "=================== WEBSOCKET WRITE ===================\n"
+				lines += fmt.Sprintf("Raw bytes: \n%v\n", string(thisWrite))
+				client.DebugPrint(lines)
+			}
+
 			err := client.websocketConnection.WriteMessage(websocket.TextMessage, thisWrite)
 			if err != nil {
-				if _, ok := err.(*websocket.CloseError); ok || client.websocketConnection == nil {
-					return
-				}
-
-				log.Fatalf("Websocket write caused unknown exception: %s\n", err.Error())
+				client.onWebsocketError(err)
 			}
 		}
 	}()
 }
 
-func (client *LibClient) startHeartbeatLoop() {
+func (client *BotClient) startHeartbeatLoop() {
+	if client.heartbeatRunning {
+		return
+	}
+
+	client.heartbeatRunning = true
+	firstRun := true
+
 	go func() {
 		for {
 			if client.websocketConnection == nil {
@@ -201,15 +243,19 @@ func (client *LibClient) startHeartbeatLoop() {
 				continue
 			}
 
-			jitter := rand.Float32()
-			waitTimeMs := client.heartbeatInterval.Milliseconds() * int64(jitter)
+			jitter := 1.0
+			if firstRun {
+				jitter = rand.Float64()
+			}
+
+			waitTimeMs := float64(client.heartbeatInterval.Milliseconds()) * jitter
 			waitTime := time.Duration(waitTimeMs) * time.Millisecond
 
 			client.DebugPrintf(
-				"Waiting for next heartbeat... (jitter = %d, interval = %d, final = %d)",
-				waitTimeMs,
+				"Waiting for next heartbeat... (jitter = %.3f, interval = %d, final = %d)",
+				jitter,
 				client.heartbeatInterval.Milliseconds(),
-				waitTimeMs,
+				waitTime.Milliseconds(),
 			)
 
 			time.Sleep(waitTime)
@@ -219,16 +265,17 @@ func (client *LibClient) startHeartbeatLoop() {
 				LastSerial: client.lastSerial,
 			}
 
-			client.writeSocket(*toJSON(data))
+			client.writeSocket(toJSON(data))
+			firstRun = false
 		}
 	}()
 }
 
-func (client *LibClient) writeSocket(data []byte) {
+func (client *BotClient) writeSocket(data json.RawMessage) {
 	client.websocketWriteQueue <- data
 }
 
-func (client *LibClient) identify() {
+func (client *BotClient) identify() {
 	identifyData := IdentifyData{
 		Token:   client.token,
 		Intents: client.intents,
@@ -241,13 +288,37 @@ func (client *LibClient) identify() {
 
 	eventData := Event{
 		Opcode: IdentifyOpcode,
-		Data:   *toJSON(identifyData),
+		Data:   toJSON(identifyData),
 	}
 
-	client.writeSocket(*toJSON(eventData))
+	client.writeSocket(toJSON(eventData))
 }
 
-func (client *LibClient) bindDefaultEvents() {
+func (client *BotClient) reconnect() error {
+	if client.websocketConnection == nil {
+		client.Run()
+	}
+
+	if client.lastSessionID == nil || client.lastSerial == nil {
+		return errors.New("invalid session. lastSerial and/or lastSessionID are nil.")
+	}
+
+	resumeData := ResumeData{
+		Token:      client.token,
+		SessionID:  *client.lastSessionID,
+		LastSerial: *client.lastSerial,
+	}
+
+	event := Event{
+		Opcode: ResumeOpcode,
+		Data:   toJSON(resumeData),
+	}
+
+	client.writeSocket(toJSON(event))
+	return nil
+}
+
+func (client *BotClient) bindDefaultEvents() {
 	client.OnOpcode(HelloOpcode, func(event *Event) {
 		var data HelloData
 		err := json.Unmarshal(event.Data, &data)
@@ -257,57 +328,73 @@ func (client *LibClient) bindDefaultEvents() {
 
 		interval := time.Duration(data.HeartbeatInterval) * time.Millisecond
 		client.heartbeatInterval = &interval
-		client.DebugPrintf("Got hello event (opcode %d) event from discord. Heartbeat interval = %dms.", HelloOpcode, interval.Milliseconds())
-	})
-
-	client.OnEvent("ready", func(event *Event) {
-		var readyData ReadyData
-		err := json.Unmarshal(event.Data, &readyData)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		client.lastReconnectURL = &readyData.ResumeGatewayURL
-		client.lastSessionID = &readyData.SessionID
-
-		client.callbackMutex.RLock()
-		defer client.callbackMutex.RUnlock()
-		for _, handler := range client.readyCallbacks {
-			go handler()
-		}
-
-		client.readyCallbacks = client.readyCallbacks[:0]
-		client.ready = true
+		client.DebugPrintf("Got hello event (opcode %d) event from discord. Heartbeat interval = %dms. Sending identify opcode.", HelloOpcode, interval.Milliseconds())
+		go client.startHeartbeatLoop()
+		go client.identify()
 	})
 
 	client.OnAnyEvent(func(event *Event) {
+		if debugMode && debugVerboseOutput {
+			lines := ""
+			lines += "==================== EVENT RECEIVED ====================\n"
+			lines += fmt.Sprintf("Opcode %d\n", event.Opcode)
+			if event.EventName == nil {
+				lines += "Event name: -\n"
+			} else {
+				lines += fmt.Sprintf("Event name: %v\n", *event.EventName)
+			}
+
+			lines += fmt.Sprintf("Raw data: \n%v\n", string(event.Data))
+			client.DebugPrint(lines)
+		}
 		if event.Serial == nil {
 			return
 		}
 
 		if client.lastSerial == nil {
 			client.lastSerial = event.Serial
-			client.DebugPrint("First serial: " + string(*event.Serial))
+			client.DebugPrint("First serial: " + strconv.Itoa(*event.Serial))
 		} else {
 			if *client.lastSerial < *event.Serial {
 				client.lastSerial = event.Serial
-				client.DebugPrint("New highest serial: " + string(*event.Serial))
+				client.DebugPrint("New highest serial: " + strconv.Itoa(*event.Serial))
 			}
 		}
 	})
 
-	if client.debugMode {
+	client.OnOpcode(ReconnectOpcode, func(event *Event) {
+		client.reconnect()
+	})
+
+	client.OnOpcode(InvalidSessionOpcode, func(event *Event) {
+		var b bool
+		if err := json.Unmarshal(event.Data, &b); err == nil {
+			if b {
+				client.reconnect()
+			}
+		}
+	})
+
+	client.addCallback(_ReadyCallbackType, func(_ *Event) {
+		client.ready = true
+	})
+
+	if debugMode {
 		client.OnOpcode(HeartbeatAcknowledgeOpcode, func(event *Event) {
 			client.DebugPrint("Heartbeat acknowledged.")
 		})
 	}
 }
 
-// Initalizes the websocket connection and returns a cleanup function to call after you're done
-func (client *LibClient) Run() error {
+func (client *BotClient) Run() error {
 	client.Cleanup()
 
-	conn, _, err := websocket.DefaultDialer.Dial(defaultURL, nil)
+	url := defaultURL
+	if client.lastReconnectURL != nil {
+		url = *client.lastReconnectURL
+	}
+
+	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 	if err != nil {
 		return err
 	}
@@ -319,26 +406,22 @@ func (client *LibClient) Run() error {
 	return nil
 }
 
-func New(token string, intents int, context context.Context, debug bool) LibClient {
-	return LibClient{
+func New(token string, intents int, context context.Context) BotClient {
+	return BotClient{
 		token:   token,
 		context: context,
 		intents: intents,
 		ready:   false,
 
-		debugMode:         debug,
-		eventCallbacks:    make(map[string][]func(data *Event)),
-		opcodeCallbacks:   make(map[int][]func(data *Event)),
-		readyCallbacks:    []func(){},
-		anyEventCalblacks: []func(data *Event){},
-		callbackMutex:     sync.RWMutex{},
-		nextCallbackID:    0,
+		callbacks:      make(map[int]*Callback),
+		callbackMutex:  sync.RWMutex{},
+		nextCallbackID: 0,
 
 		lastSessionID:     nil,
 		lastReconnectURL:  nil,
 		lastSerial:        nil,
 		heartbeatInterval: nil,
 
-		websocketWriteQueue: make(chan []byte),
+		websocketWriteQueue: make(chan json.RawMessage),
 	}
 }
